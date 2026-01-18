@@ -3,14 +3,17 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>My Navi App</title>
+    <title>Dosanko Midnight App</title>
     <script src="https://unpkg.com/maplibre-gl@3.x/dist/maplibre-gl.js"></script>
     <link href="https://unpkg.com/maplibre-gl@3.x/dist/maplibre-gl.css" rel="stylesheet" />
+    <!-- Firebase SDK (互換モード) -->
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
     <style>
         body { margin: 0; padding: 0; font-family: -apple-system, sans-serif; overflow: hidden; background: #f0f0f0; }
         #map { position: absolute; top: 0; bottom: 0; width: 100%; }
 
-        /* 三点リーダーボタン */
+        /* 右上のメニューボタン */
         .menu-trigger {
             position: absolute; top: 15px; right: 15px; z-index: 100;
             background: white; width: 44px; height: 44px; border-radius: 50%;
@@ -18,70 +21,94 @@
             box-shadow: 0 2px 10px rgba(0,0,0,0.2); cursor: pointer; font-size: 24px;
         }
 
-        /* サイドパネルメニュー */
+        /* サイドパネル */
         .side-menu {
-            position: absolute; top: 0; right: -280px; width: 250px; height: 100%;
-            background: rgba(255, 255, 255, 0.95); z-index: 90;
-            transition: 0.3s; padding: 80px 15px 20px;
+            position: absolute; top: 0; right: -310px; width: 280px; height: 100%;
+            background: rgba(255, 255, 255, 0.98); z-index: 90;
+            transition: 0.3s; padding: 70px 10px 20px;
             box-shadow: -2px 0 10px rgba(0,0,0,0.1);
-            display: flex; flex-direction: column; gap: 10px;
-            overflow-y: auto;
+            display: flex; flex-direction: column; gap: 8px; overflow-y: auto;
         }
         .side-menu.open { right: 0; }
 
-        /* ナビ情報パネル */
-        .nav-info {
-            position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%);
-            z-index: 50; background: rgba(0,0,0,0.7); color: white;
-            padding: 12px 25px; border-radius: 30px; font-weight: bold;
-            display: none; text-align: center; pointer-events: none;
-        }
-
+        .btn-group { display: flex; gap: 4px; }
         button {
-            width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 8px;
-            background: white; font-size: 14px; font-weight: bold; cursor: pointer;
+            flex: 1; padding: 12px; border: 1px solid #ddd; border-radius: 8px;
+            background: white; font-size: 13px; font-weight: bold; cursor: pointer;
         }
-        button.active { background: #ff4444; color: white; border-color: #ff4444; }
-        .section-title { font-size: 12px; color: #666; margin-top: 10px; font-weight: bold; }
+        button.active { background: #ff4444 !important; color: white !important; }
         
-        #route-list { margin-top: 5px; }
+        .section-title { font-size: 11px; color: #888; margin-top: 10px; font-weight: bold; text-transform: uppercase; }
+        
+        /* ルートリスト */
         .route-item { 
-            display: flex; justify-content: space-between; align-items: center;
-            padding: 8px; border-bottom: 1px solid #eee; font-size: 13px;
+            display: flex; align-items: center; gap: 8px;
+            padding: 10px; border-bottom: 1px solid #eee; font-size: 14px; background: #fff; border-radius: 4px; margin-bottom: 4px;
+        }
+        .fav-btn { font-size: 20px; color: #ccc; cursor: pointer; border:none; background:none; padding:0; }
+        .fav-btn.active { color: #fbc02d; }
+        .route-name { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .del-btn { color: #ff5252; font-size: 18px; border:none; background:none; cursor:pointer; padding:5px; }
+
+        /* 左下のやり直しパネル */
+        .undo-panel {
+            position: absolute; bottom: 30px; left: 15px; z-index: 80;
+            display: none; background: white; padding: 5px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.2);
         }
     </style>
 </head>
 <body>
 
-<!-- 三点リーダーボタン -->
 <div class="menu-trigger" onclick="toggleMenu()">⋮</div>
 
-<!-- サイドメニュー -->
 <div id="side-menu" class="side-menu">
-    <div class="section-title">ナビ・追従</div>
-    <button id="trackBtn" onclick="toggleTracking()">追従モード: OFF</button>
-    
     <div class="section-title">ルート作成</div>
-    <button id="drawModeBtn" onclick="toggleMode('draw')">なぞって作成</button>
-    <button id="autoModeBtn" onclick="toggleMode('auto')">自動ルート作成</button>
-    <button onclick="saveCurrentRoute()" style="background: #e3f2fd;">今のルートを保存</button>
-    
-    <div class="section-title">外部連携・その他</div>
-    <button onclick="openGoogleMaps()">Googleマップで開く</button>
-    <button onclick="clearMap()" style="color: red;">全てクリア</button>
+    <div class="btn-group">
+        <button id="drawModeBtn" onclick="toggleMode('draw')">なぞる</button>
+        <button id="autoModeBtn" onclick="toggleMode('auto')">自動検索</button>
+    </div>
+    <button id="saveBtn" onclick="saveToCloud()" style="background: #e3f2fd;">クラウドに保存・全員に共有</button>
+    <button onclick="clearCurrent()" style="font-weight: normal; font-size: 11px;">表示中のルートをリセット</button>
 
-    <div class="section-title">保存済みルート</div>
-    <div id="route-list"></div>
+    <div class="section-title">みんなのルート</div>
+    <div id="route-list">読み込み中...</div>
+
+    <div class="section-title">設定</div>
+    <button onclick="toggleTracking()" id="trackBtn">追従モード: OFF</button>
+    <button onclick="requestLocation()">現在地を表示</button>
 </div>
 
-<!-- 距離表示 -->
-<div id="nav-info" class="nav-info">
-    目的地まで あと <span id="distance">-</span>
+<div id="undo-panel" class="undo-panel">
+    <button onclick="undoLastAction()">↩ 1つ戻す (やり直し)</button>
 </div>
 
 <div id="map"></div>
 
 <script>
+    // --- Firebase設定（提供情報を反映） ---
+    const firebaseConfig = {
+        apiKey: "AIzaSyCM1JORf6ntrSjgD8_Scx1aogVmmjoMmYk",
+        authDomain: "dosanko-midnight-app.firebaseapp.com",
+        projectId: "dosanko-midnight-app",
+        storageBucket: "dosanko-midnight-app.firebasestorage.app",
+        messagingSenderId: "740298034300",
+        appId: "1:740298034300:web:05ea779fddaf7fab480df9",
+        measurementId: "G-0B0NF4EBLG",
+        // databaseURLは通常この形式になります。Firebase画面で確認してください。
+        databaseURL: "https://dosanko-midnight-app-default-rtdb.asia-southeast1.firebasedatabase.app"
+    };
+
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.database();
+
+    // 削除権限のためのユーザーID（スマホごとに保存）
+    if(!localStorage.getItem('dosanko_user_id')) {
+        localStorage.setItem('dosanko_user_id', 'u_' + Math.random().toString(36).substr(2, 9));
+    }
+    const MY_ID = localStorage.getItem('dosanko_user_id');
+
+    // --- 地図初期設定 (札幌) ---
+    const SAPPORO = [141.3545, 43.0621];
     const map = new maplibregl.Map({
         container: 'map',
         style: {
@@ -89,155 +116,182 @@
             sources: { 'osm': { type: 'raster', tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'], tileSize: 256, attribution: '© OSM' } },
             layers: [{ id: 'osm-layer', type: 'raster', source: 'osm' }]
         },
-        center: [139.767, 35.681],
-        zoom: 14
+        center: SAPPORO, zoom: 14
     });
 
-    let isTracking = false;
-    let watchId = null;
     let currentRoute = [];
+    let routeHistory = []; 
     let mode = 'none';
+    let isTracking = false;
 
     map.on('load', () => {
-        // ルート表示用レイヤー
         map.addSource('route', { type: 'geojson', data: { type: 'Feature', geometry: { type: 'LineString', coordinates: [] } } });
         map.addLayer({ id: 'route-layer', type: 'line', source: 'route', paint: { 'line-color': '#ff4444', 'line-width': 6, 'line-opacity': 0.7 } });
-
-        // 現在地（プライバシー配慮：円で表示）用のソース
+        
         map.addSource('user-pos', { type: 'geojson', data: { type: 'Point', coordinates: [] } });
-        map.addLayer({
-            id: 'user-area',
-            type: 'circle',
-            source: 'user-pos',
-            paint: {
-                'circle-radius': 30, // 誤差の範囲（ピクセル指定、実際はもっと曖昧）
-                'circle-color': '#007bff',
-                'circle-opacity': 0.3,
-                'circle-stroke-width': 2,
-                'circle-stroke-color': '#007bff'
-            }
-        });
-        updateRouteList();
+        map.addLayer({ id: 'user-area', type: 'circle', source: 'user-pos', paint: { 'circle-radius': 15, 'circle-color': '#007bff', 'circle-opacity': 0.4 } });
+
+        syncCloudRoutes(); // クラウドからルートを読み込み
+        requestLocation(); // 初期位置取得
     });
 
-    // --- メニュー開閉 ---
-    function toggleMenu() {
-        document.getElementById('side-menu').classList.toggle('open');
+    // --- やり直し機能 ---
+    function saveHistory() {
+        routeHistory.push(JSON.stringify(currentRoute));
+        if(routeHistory.length > 30) routeHistory.shift();
     }
 
-    // --- 追従モード（精度制限あり） ---
-    function toggleTracking() {
-        isTracking = !isTracking;
-        const btn = document.getElementById('trackBtn');
-        btn.classList.toggle('active', isTracking);
-        btn.innerText = `追従モード: ${isTracking ? 'ON' : 'OFF'}`;
-        document.getElementById('nav-info').style.display = isTracking ? 'block' : 'none';
+    function undoLastAction() {
+        if(routeHistory.length === 0) return;
+        currentRoute = JSON.parse(routeHistory.pop());
+        updateMapLine();
+    }
 
-        if (isTracking) {
-            // enableHighAccuracy: false でバッテリー消費と精度を抑える
-            watchId = navigator.geolocation.watchPosition(updatePosition, null, { enableHighAccuracy: false });
-            toggleMenu(); // メニューを閉じる
-        } else {
-            if (watchId) navigator.geolocation.clearWatch(watchId);
+    // --- クラウド保存・同期 ---
+    function saveToCloud() {
+        if (currentRoute.length < 2) return alert("ルートを描いてください");
+        const name = prompt("ルートの名前", "札幌ルート " + new Date().toLocaleTimeString());
+        if (!name) return;
+
+        const newRef = db.ref('shared_routes').push();
+        newRef.set({
+            name: name,
+            coords: currentRoute,
+            creator: MY_ID,
+            timestamp: Date.now()
+        }).then(() => {
+            alert("クラウドに保存しました！みんなのリストに表示されます。");
+            clearCurrent();
+        });
+    }
+
+    function syncCloudRoutes() {
+        db.ref('shared_routes').on('value', (snapshot) => {
+            const list = document.getElementById('route-list');
+            list.innerHTML = '';
+            const data = snapshot.val();
+            const favs = JSON.parse(localStorage.getItem('dosanko_favs') || '[]');
+
+            const routes = [];
+            for(let id in data) {
+                routes.push({ id, ...data[id], isFav: favs.includes(id) });
+            }
+
+            // お気に入り順、次に新しい順
+            routes.sort((a, b) => (b.isFav - a.isFav) || (b.timestamp - a.timestamp));
+
+            routes.forEach(r => {
+                const item = document.createElement('div');
+                item.className = 'route-item';
+                item.innerHTML = `
+                    <button class="fav-btn ${r.isFav?'active':''}" onclick="toggleFav('${r.id}')">${r.isFav?'★':'☆'}</button>
+                    <div class="route-name" onclick="loadCloudRoute('${r.id}')">${r.name}</div>
+                    ${r.creator === MY_ID ? `<button class="del-btn" onclick="deleteRoute('${r.id}')">🗑</button>` : ''}
+                `;
+                list.appendChild(item);
+            });
+        });
+    }
+
+    function deleteRoute(id) {
+        if(confirm("このルートを削除しますか？（作成者のみ削除可能です）")) {
+            db.ref('shared_routes/' + id).remove();
         }
     }
 
-    function updatePosition(pos) {
-        const { latitude, longitude } = pos.coords;
-        const coords = [longitude, latitude];
-        
-        // あえて少しだけ座標をぼかす処理（0.0001度 ≒ 約10mのランダム誤差）
-        const fuzzyCoords = [
-            longitude + (Math.random() - 0.5) * 0.0002,
-            latitude + (Math.random() - 0.5) * 0.0002
-        ];
-
-        map.getSource('user-pos').setData({ type: 'Point', coordinates: fuzzyCoords });
-        if (isTracking) map.easeTo({ center: fuzzyCoords });
-
-        if (currentRoute.length > 0) {
-            const dest = currentRoute[currentRoute.length - 1];
-            document.getElementById('distance').innerText = calculateDistance(longitude, latitude, dest[0], dest[1]);
-        }
+    function toggleFav(id) {
+        let favs = JSON.parse(localStorage.getItem('dosanko_favs') || '[]');
+        if(favs.includes(id)) favs = favs.filter(f => f !== id);
+        else favs.push(id);
+        localStorage.setItem('dosanko_favs', JSON.stringify(favs));
+        // Firebaseのリスナーが自動的に再描画してくれます
     }
 
-    // --- モード切替 ---
+    function loadCloudRoute(id) {
+        db.ref('shared_routes/' + id).once('value', (s) => {
+            currentRoute = s.val().coords;
+            updateMapLine();
+            map.flyTo({ center: currentRoute[0] });
+            toggleMenu();
+        });
+    }
+
+    // --- ルート描画・操作 ---
     function toggleMode(m) {
         mode = (mode === m) ? 'none' : m;
         document.getElementById('drawModeBtn').classList.toggle('active', mode === 'draw');
         document.getElementById('autoModeBtn').classList.toggle('active', mode === 'auto');
-        if (mode !== 'none') toggleMenu();
-        if (mode === 'draw') map.dragPan.disable(); else map.dragPan.enable();
+        document.getElementById('undo-panel').style.display = (mode === 'draw') ? 'block' : 'none';
+        
+        if (mode === 'draw') {
+            map.dragPan.disable();
+            map.touchZoomRotate.disable();
+            toggleMenu();
+        } else {
+            map.dragPan.enable();
+            map.touchZoomRotate.enable();
+        }
     }
 
-    // --- ルート作成（なぞり & クリック） ---
-    map.on('mousemove', (e) => {
+    const handleMove = (e) => {
         if (mode !== 'draw') return;
+        if (currentRoute.length % 5 === 0) saveHistory();
         currentRoute.push([e.lngLat.lng, e.lngLat.lat]);
         updateMapLine();
-    });
+    };
+    map.on('mousemove', handleMove);
+    map.on('touchmove', handleMove);
 
     map.on('click', async (e) => {
         if (mode !== 'auto') return;
+        saveHistory();
         const coords = [e.lngLat.lng, e.lngLat.lat];
         if (currentRoute.length > 0) {
             const start = currentRoute[currentRoute.length - 1];
             const url = `https://router.project-osrm.org/route/v1/walking/${start[0]},${start[1]};${coords[0]},${coords[1]}?overview=full&geometries=geojson`;
-            const res = await fetch(url);
-            const data = await res.json();
-            if (data.routes[0]) currentRoute = currentRoute.concat(data.routes[0].geometry.coordinates);
+            const res = await fetch(url).then(r => r.json());
+            if (res.routes[0]) {
+                currentRoute = currentRoute.concat(res.routes[0].geometry.coordinates);
+                updateMapLine();
+            }
         } else {
             currentRoute.push(coords);
+            updateMapLine();
         }
-        updateMapLine();
     });
 
     function updateMapLine() {
-        map.getSource('route').setData({ type: 'Feature', geometry: { type: 'LineString', coordinates: currentRoute } });
+        const data = currentRoute.length > 1 ? currentRoute : [[0,0],[0,0]];
+        map.getSource('route').setData({ type: 'Feature', geometry: { type: 'LineString', coordinates: data } });
     }
 
-    // --- 保存・読み込み ---
-    function saveCurrentRoute() {
-        const name = prompt("ルート名を入力", "マイルート " + new Date().toLocaleTimeString());
-        if (!name) return;
-        const saved = JSON.parse(localStorage.getItem('my_routes') || '[]');
-        saved.push({ name, data: currentRoute });
-        localStorage.setItem('my_routes', JSON.stringify(saved));
-        updateRouteList();
+    function clearCurrent() { currentRoute = []; routeHistory = []; updateMapLine(); }
+    
+    function toggleMenu() { document.getElementById('side-menu').classList.toggle('open'); }
+
+    // --- 現在地・追従 ---
+    function requestLocation() {
+        navigator.geolocation.getCurrentPosition(pos => {
+            const coords = [pos.coords.longitude, pos.coords.latitude];
+            map.getSource('user-pos').setData({ type: 'Point', coordinates: coords });
+            map.flyTo({ center: coords });
+        }, null, { enableHighAccuracy: false });
     }
 
-    function updateRouteList() {
-        const list = document.getElementById('route-list');
-        list.innerHTML = '';
-        JSON.parse(localStorage.getItem('my_routes') || '[]').forEach((r, i) => {
-            const item = document.createElement('div');
-            item.className = 'route-item';
-            item.innerHTML = `<span>${r.name}</span><button onclick="loadRoute(${i})" style="width:50px; padding:5px;">表示</button>`;
-            list.appendChild(item);
-        });
+    function startLocationWatcher() {
+        navigator.geolocation.watchPosition(pos => {
+            const coords = [pos.coords.longitude, pos.coords.latitude];
+            if (map.getSource('user-pos')) map.getSource('user-pos').setData({ type: 'Point', coordinates: coords });
+            if (isTracking) map.easeTo({ center: coords });
+        }, null, { enableHighAccuracy: false });
     }
+    startLocationWatcher();
 
-    function loadRoute(i) {
-        currentRoute = JSON.parse(localStorage.getItem('my_routes'))[i].data;
-        updateMapLine();
-        map.flyTo({ center: currentRoute[0] });
-        toggleMenu();
-    }
-
-    function clearMap() {
-        if (confirm("全てのデータをクリアしますか？")) {
-            localStorage.clear();
-            location.reload();
-        }
-    }
-
-    function calculateDistance(lon1, lat1, lon2, lat2) {
-        const R = 6371;
-        const dLat = (lat2-lat1)*Math.PI/180;
-        const dLon = (lon2-lon1)*Math.PI/180;
-        const a = Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLon/2)**2;
-        const d = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-        return d > 1 ? d.toFixed(1)+"km" : (d*1000).toFixed(0)+"m";
+    function toggleTracking() {
+        isTracking = !isTracking;
+        document.getElementById('trackBtn').classList.toggle('active', isTracking);
+        document.getElementById('trackBtn').innerText = `追従モード: ${isTracking?'ON':'OFF'}`;
+        if(isTracking) toggleMenu();
     }
 
     function openGoogleMaps() {
