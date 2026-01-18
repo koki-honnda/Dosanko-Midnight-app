@@ -3,71 +3,147 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>My Semi-Permanent Map</title>
-    <!-- 地図ライブラリ MapLibre GL JS -->
+    <title>My Navi App</title>
     <script src="https://unpkg.com/maplibre-gl@3.x/dist/maplibre-gl.js"></script>
     <link href="https://unpkg.com/maplibre-gl@3.x/dist/maplibre-gl.css" rel="stylesheet" />
     <style>
-        body { margin: 0; padding: 0; }
+        body { margin: 0; padding: 0; font-family: sans-serif; }
         #map { position: absolute; top: 0; bottom: 0; width: 100%; }
-        .menu-bar {
-            position: absolute; top: 10px; left: 10px; z-index: 1;
-            background: white; padding: 10px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+        .ui-panel {
+            position: absolute; top: 10px; left: 10px; z-index: 10;
+            background: rgba(255,255,255,0.9); padding: 10px; border-radius: 8px;
+            width: 200px; box-shadow: 0 2px 10px rgba(0,0,0,0.2);
         }
-        .btn { margin-bottom: 5px; display: block; width: 100%; cursor: pointer; }
+        button { width: 100%; margin: 4px 0; padding: 8px; cursor: pointer; border: 1px solid #ccc; border-radius: 4px; }
+        .active { background: #ff4444; color: white; }
+        #route-list { margin-top: 10px; max-height: 150px; overflow-y: auto; font-size: 12px; }
+        .route-item { border-bottom: 1px solid #eee; padding: 5px 0; display: flex; justify-content: space-between; }
     </style>
 </head>
 <body>
 
-<div class="menu-bar">
-    <button class="btn" onclick="locateUser()">現在地へ移動</button>
-    <button class="btn" onclick="openGoogleMaps()">Googleマップで開く</button>
+<div class="ui-panel">
+    <button onclick="locateUser()">現在地を表示</button>
+    <button id="drawModeBtn" onclick="toggleMode('draw')">なぞって作成: OFF</button>
+    <button id="autoModeBtn" onclick="toggleMode('auto')">自動ルート: OFF</button>
+    <button onclick="saveCurrentRoute()">今のルートを保存</button>
+    <button onclick="clearMap()" style="background:#eee;">クリア</button>
+    <div id="route-list"><strong>保存済みルート</strong></div>
 </div>
+
 <div id="map"></div>
 
 <script>
-    // 1. 地図の初期化 (OpenStreetMapのタイルを使用)
     const map = new maplibregl.Map({
         container: 'map',
         style: {
             version: 8,
-            sources: {
-                'osm': {
-                    type: 'raster',
-                    tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
-                    tileSize: 256,
-                    attribution: '© OpenStreetMap contributors'
-                }
-            },
-            layers: [{
-                id: 'osm-layer',
-                type: 'raster',
-                source: 'osm'
-            }]
+            sources: { 'osm': { type: 'raster', tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'], tileSize: 256, attribution: '© OSM' } },
+            layers: [{ id: 'osm-layer', type: 'raster', source: 'osm' }]
         },
-        center: [139.767, 35.681], // 東京駅付近
+        center: [139.767, 35.681],
         zoom: 13
     });
 
-    // 2. 現在地取得機能
-    let userMarker;
-    function locateUser() {
-        navigator.geolocation.getCurrentPosition(pos => {
-            const { latitude, longitude } = pos.coords;
-            map.flyTo({ center: [longitude, latitude], zoom: 15 });
-            
-            if (userMarker) userMarker.remove();
-            userMarker = new maplibregl.Marker({ color: 'blue' })
-                .setLngLat([longitude, latitude])
-                .addTo(map);
-        }, err => alert("位置情報の取得に失敗しました"), { enableHighAccuracy: true });
+    let mode = 'none'; // 'none', 'draw', 'auto'
+    let currentRoute = [];
+    let markers = [];
+
+    map.on('load', () => {
+        map.addSource('route', { type: 'geojson', data: { type: 'Feature', geometry: { type: 'LineString', coordinates: [] } } });
+        map.addLayer({ id: 'route-layer', type: 'line', source: 'route', paint: { 'line-color': '#ff4444', 'line-width': 5 } });
+        updateRouteList();
+    });
+
+    function toggleMode(newMode) {
+        if (mode === newMode) mode = 'none';
+        else mode = newMode;
+        
+        document.getElementById('drawModeBtn').classList.toggle('active', mode === 'draw');
+        document.getElementById('drawModeBtn').innerText = `なぞって作成: ${mode === 'draw' ? 'ON' : 'OFF'}`;
+        document.getElementById('autoModeBtn').classList.toggle('active', mode === 'auto');
+        document.getElementById('autoModeBtn').innerText = `自動ルート: ${mode === 'auto' ? 'ON' : 'OFF'}`;
+
+        if (mode === 'draw') { map.dragPan.disable(); } else { map.dragPan.enable(); }
     }
 
-    // 3. 予備手段：Googleマップを外部起動
-    function openGoogleMaps() {
-        const center = map.getCenter();
-        const url = `https://www.google.com/maps/@${center.lat},${center.lng},15z`;
-        window.open(url, '_blank');
+    // 地図操作の処理
+    map.on('click', async (e) => {
+        if (mode !== 'auto') return;
+        const coords = [e.lngLat.lng, e.lngLat.lat];
+        currentRoute.push(coords);
+        new maplibregl.Marker().setLngLat(coords).addTo(map);
+        
+        if (currentRoute.length >= 2) {
+            const start = currentRoute[currentRoute.length - 2];
+            const end = currentRoute[currentRoute.length - 1];
+            fetchRoute(start, end);
+        }
+    });
+
+    map.on('mousemove', (e) => {
+        if (mode !== 'draw') return;
+        currentRoute.push([e.lngLat.lng, e.lngLat.lat]);
+        updateMapLine();
+    });
+
+    // OSRM APIを使用した自動ルート検索
+    async function fetchRoute(start, end) {
+        const url = `https://router.project-osrm.org/route/v1/driving/${start[0]},${start[1]};${end[0]},${end[1]}?overview=full&geometries=geojson`;
+        const response = await fetch(url);
+        const data = await response.json();
+        if (data.routes && data.routes[0]) {
+            // 自動ルートの場合は、点列をOSRMの結果に置き換える（簡易版のため全結合はせず追加のみ）
+            const newCoords = data.routes[0].geometry.coordinates;
+            currentRoute = currentRoute.concat(newCoords);
+            updateMapLine();
+        }
+    }
+
+    function updateMapLine() {
+        map.getSource('route').setData({ type: 'Feature', geometry: { type: 'LineString', coordinates: currentRoute } });
+    }
+
+    function saveCurrentRoute() {
+        if (currentRoute.length === 0) return;
+        const name = prompt("ルートの名前を入力してください", "マイリルート " + new Date().toLocaleTimeString());
+        if (!name) return;
+        const saved = JSON.parse(localStorage.getItem('my_routes') || '[]');
+        saved.push({ name, data: currentRoute });
+        localStorage.setItem('my_routes', JSON.stringify(saved));
+        updateRouteList();
+    }
+
+    function updateRouteList() {
+        const list = document.getElementById('route-list');
+        list.innerHTML = '<strong>保存済みルート</strong>';
+        const saved = JSON.parse(localStorage.getItem('my_routes') || '[]');
+        saved.forEach((r, index) => {
+            const div = document.createElement('div');
+            div.className = 'route-item';
+            div.innerHTML = `<span>${r.name}</span> <button onclick="loadRoute(${index})" style="width:40px; padding:2px;">表示</button>`;
+            list.appendChild(div);
+        });
+    }
+
+    function loadRoute(index) {
+        const saved = JSON.parse(localStorage.getItem('my_routes') || '[]');
+        currentRoute = saved[index].data;
+        updateMapLine();
+        const first = currentRoute[0];
+        map.flyTo({ center: first, zoom: 14 });
+    }
+
+    function clearMap() {
+        currentRoute = [];
+        updateMapLine();
+        location.reload(); // マーカー等も消すため簡易的にリロード
+    }
+
+    function locateUser() {
+        navigator.geolocation.getCurrentPosition(pos => {
+            map.flyTo({ center: [pos.coords.longitude, pos.coords.latitude], zoom: 15 });
+        });
     }
 </script>
 </body>
